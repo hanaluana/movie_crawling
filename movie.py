@@ -3,6 +3,7 @@ import os
 import csv
 from time import sleep
 import json
+from bs4 import BeautifulSoup
 
 class Movie():
     def __init__(self):
@@ -13,16 +14,20 @@ class Movie():
         self.day = day
         self.date = date
     
-    def set_movie_detail(self,name_kor,genre, pd):
+    def set_movie_detail(self,name_kor,genre, pd, nation, openDate, watchGrade, duration):
         self.title = name_kor
         self.genre = genre
         self.pd = pd
+        self.nation = nation
+        self.openDate = openDate
+        self.watchGrade = watchGrade
+        self.duration = duration
     
     def set_naver_movie(self,thumb_url, link_url, user_rating):
         self.thumb_url = thumb_url
         self.link_url = link_url
         self.user_rating = user_rating
-
+    
 def getWeeklymovie(days, movie_key, WeekGb, movie):
 
     redundant = set()
@@ -62,8 +67,12 @@ def getMovieDetail(movie_key, movie):
     for m in movie:
         movie_url = "http://www.kobis.or.kr/kobisopenapi/webservice/rest/movie/searchMovieInfo.json?key={}&movieCd={}".format(movie_key, m.code)
         doc = requests.get(movie_url).json()
-        
         name_kor = doc["movieInfoResult"]["movieInfo"]["movieNm"]
+        nation = doc["movieInfoResult"]["movieInfo"]["nations"][0]["nationNm"]
+        openDate = doc["movieInfoResult"]["movieInfo"]["openDt"]
+        watchGrade = doc["movieInfoResult"]["movieInfo"]['audits'][0]['watchGradeNm']
+        duration = doc["movieInfoResult"]["movieInfo"]["showTm"]
+
         temp_genre = doc["movieInfoResult"]["movieInfo"]["genres"]
         genre = []
         for temp in temp_genre:
@@ -72,18 +81,14 @@ def getMovieDetail(movie_key, movie):
             genre.append(genres.index(temp["genreNm"])+1)
 
         pd = doc["movieInfoResult"]["movieInfo"]["directors"][0]["peopleNm"]
-        m.set_movie_detail(name_kor,genre, pd)
-        new_movie.append({"pk":pk, "model":"movies.movie", "fields":{"title":name_kor, "genre":genre, "director":pd}})
+        m.set_movie_detail(name_kor,genre, pd, nation, openDate, watchGrade, duration)
+        new_movie.append({"pk":pk, "model":"movies.movie", 
+        "fields":{"title":name_kor, "genre":genre, "director":pd, "nation":nation, "openDate": openDate,
+        "watchGrade": watchGrade, "duration":duration}})
         pk+=1
     return new_movie
     
 def writeMovieDetail(filename, movie):
-    # with open('movie.csv', 'w', encoding='utf-8', newline="") as f:
-    #     fieldnames = ['title','genres','directors']
-    #     w = csv.DictWriter(f, fieldnames=fieldnames)
-    #     w.writeheader()
-    #     for m in movie:
-    #         w.writerow({'title': m.name_kor,''genres': m.genre,'directors': m.pd,'watch_grade_nm': m.level,'actor1': m.actor1,'actor2': m.actor2,'actor3': m.actor3})
     base_url = "https://openapi.naver.com/v1/search/movie?query="
     headers = {
         'X-Naver-Client-Id': naver_key,
@@ -93,10 +98,63 @@ def writeMovieDetail(filename, movie):
     for m in movie:
         url = base_url + m['fields']['title']
         res = requests.get(url,headers=headers).json()
-        m['fields']['image']=res['items'][0]['image']
+        # m['fields']['image']=res['items'][0]['image']
         m['fields']['naver_link']=res['items'][0]['link']
+        naver_link = res['items'][0]['link']
+        movie_code = naver_link[naver_link.index('=')+1:]
+        # 이미지 가져오기
+        naver_imgUrl = 'https://movie.naver.com/movie/bi/mi/photoViewPopup.nhn?movieCode='+movie_code
+        doc = requests.get(naver_imgUrl).text
+        doc = BeautifulSoup(doc, 'html.parser')
+        temp_img = doc.select_one('#targetImage')['src']
+        m['fields']['image'] = temp_img
+
+        # 줄거리 가져오기
+        doc = requests.get(naver_link).text
+        doc = BeautifulSoup(doc, 'html.parser')
+        
+        temp_summary = doc.find('p',{'class':'con_tx'})
+        if temp_summary:
+            temp_summary = temp_summary.text
+            temp_summary = temp_summary.replace('\r','')
+            m['fields']['summary'] = temp_summary
+        else:
+            m['fields']['summary'] = ''
+        
+        # 누적 관객수 가져오기
+        temp_audience = doc.find('p',{'class':'count'})
+        if temp_audience:
+            temp_audience = temp_audience.text
+            ind = temp_audience.index('명')
+            m['fields']['audience'] = temp_audience[:ind]
+        else:
+            m['fields']['audience'] = ''
+
+        # 예매 링크
+        temp_reserve = doc.select_one('#reserveBasic')
+        if temp_reserve:
+            m['fields']['reservation'] = 'https://movie.naver.com'+temp_reserve['href']
+        else:
+            m['fields']['reservation']=''
+
+        # 관련 사진
+        photo_url = 'https://movie.naver.com/movie/bi/mi/photoView.nhn?code='+movie_code
+        doc = requests.get(photo_url).text
+        doc = BeautifulSoup(doc, 'html.parser')
+        photos = doc.findAll('li',{'class':'_list'})
+        temp_photos = []
+        for photo in photos:
+            temp_i = photo['data-json'].index('886px')
+            temp_end = photo['data-json'].index(',"viewCount"')
+            temp_photos.append(photo['data-json'][temp_i+8:temp_end-1])
+        # print(temp_photos)
+        # print(m)
+        m['fields']['otherimages'] = temp_photos
+
+        # 유저 평점
         m['fields']['user_Rating']=res['items'][0]['userRating']
         sleep(1) #속도 제한 조건 때문에 설정
+    print(movie)
     with open("movie.json","w", encoding="utf-8") as f:
         json.dump(movie, f, ensure_ascii=False)
 
@@ -104,7 +162,6 @@ def getNaverMovie(movie, base_url, headers):
     for m in movie:
         url = base_url + m.name_kor
         res = requests.get(url,headers=headers).json()
-        #print(res)
         m.set_naver_movie(res['items'][0]['image'],res['items'][0]['link'], res['items'][0]['userRating'])
         sleep(1) #속도 제한 조건 때문에 설정
     return movie
@@ -126,7 +183,7 @@ def writeMovieImages(movie):
 if __name__ == '__main__':
     genres = []
     movie = []
-    movie_key = '57c567fe90e0a70ffd32f569562e1a40'
+    movie_key = '53cb2d2cf4ad6a79314fcaa91d0f977b'
     naver_key = 'hCvX9KPAqQcNFOw85TMe'
     naver_secret = 'QIXciwWY1b'
     days = ["20190310","20190317","20190324","20190331","20190407","20190414","20190421","20190428","20190505","20190512"]
