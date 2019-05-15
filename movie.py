@@ -211,7 +211,13 @@ if __name__ == '__main__':
     writeWeeklymovie('boxoffice.csv',movie)
     movie = getMovieDetail(movie_key, movie)
     writeMovieDetail('movie.csv', movie)
-    print(genres)
+    tt = 1
+    genre_model = []
+    for genre in genres:
+        genre_model.append({"pk":tt, "model":"movies.genre", "fields":{"name":genre}})
+        tt+=1
+    with open("genre.json","w",encoding="utf-8") as f:
+        json.dump(genre_model, f, ensure_ascii=False)
     # movie = getNaverMovie(movie, naver_base_url, headers)
     # writeNaverMovie('movie_naver.csv',movie)
     # os.mkdir('./images/')
