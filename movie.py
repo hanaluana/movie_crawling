@@ -89,6 +89,8 @@ def getMovieDetail(movie_key, movie):
     return new_movie
     
 def writeMovieDetail(filename, movie):
+    global i
+    global image_model
     base_url = "https://openapi.naver.com/v1/search/movie?query="
     headers = {
         'X-Naver-Client-Id': naver_key,
@@ -143,13 +145,17 @@ def writeMovieDetail(filename, movie):
         doc = BeautifulSoup(doc, 'html.parser')
         photos = doc.findAll('li',{'class':'_list'})
         temp_photos = []
+
         for photo in photos:
             temp_i = photo['data-json'].index('886px')
             temp_end = photo['data-json'].index(',"viewCount"')
             temp_photos.append(photo['data-json'][temp_i+8:temp_end-1])
         # print(temp_photos)
         # print(m)
-        m['fields']['otherimages'] = temp_photos
+        for photo in temp_photos:
+            image_model.append({"pk":i, "model":"movies.image", "fields":{"movie":m["pk"], "url":photo}})
+            i+=1
+        # m['fields']['otherimages'] = temp_photos
 
         # 유저 평점
         m['fields']['user_Rating']=res['items'][0]['userRating']
@@ -157,6 +163,11 @@ def writeMovieDetail(filename, movie):
     print(movie)
     with open("movie.json","w", encoding="utf-8") as f:
         json.dump(movie, f, ensure_ascii=False)
+
+    with open("image.json","w",encoding="utf-8") as f:
+        json.dump(image_model, f, ensure_ascii=False)
+
+    
 
 def getNaverMovie(movie, base_url, headers):
     for m in movie:
@@ -181,8 +192,10 @@ def writeMovieImages(movie):
             handler.write(img_data)
 
 if __name__ == '__main__':
+    i = 1
     genres = []
     movie = []
+    image_model = []
     movie_key = '53cb2d2cf4ad6a79314fcaa91d0f977b'
     naver_key = 'hCvX9KPAqQcNFOw85TMe'
     naver_secret = 'QIXciwWY1b'
